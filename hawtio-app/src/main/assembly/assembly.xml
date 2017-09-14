@@ -26,6 +26,7 @@
         <include>org.slf4j:*</include>
         <include>log4j:log4j</include>
         <include>javax.servlet:javax.servlet-api</include>
+        <include>org.keycloak:keycloak-jetty9-adapter</include>
       </includes>
     </dependencySet>
     <dependencySet>
