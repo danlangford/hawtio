@@ -4,12 +4,12 @@ import io.hawt.system.Helpers;
 import io.hawt.system.ProxyWhitelist;
 import io.hawt.util.Strings;
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.io.FileUtils;
 import org.apache.http.*;
 import org.apache.http.client.CookieStore;
 import org.apache.http.client.methods.AbortableHttpRequest;
 import org.apache.http.client.utils.URIUtils;
-import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
-import org.apache.http.conn.ssl.SSLContextBuilder;
+import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.impl.client.BasicCookieStore;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -19,6 +19,7 @@ import org.apache.http.message.BasicHeader;
 import org.apache.http.message.BasicHttpEntityEnclosingRequest;
 import org.apache.http.message.BasicHttpRequest;
 import org.apache.http.message.HeaderGroup;
+import org.apache.http.ssl.SSLContextBuilder;
 import org.apache.http.util.EntityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,16 +30,15 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
-import java.security.KeyManagementException;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.X509Certificate;
+import java.security.*;
+import java.security.cert.CertificateException;
 import java.util.BitSet;
 import java.util.Enumeration;
 import java.util.Formatter;
@@ -86,6 +86,14 @@ public class ProxyServlet extends HttpServlet {
     private static final String PROXY_ACCEPT_SELF_SIGNED_CERTS = "hawtio.proxyDisableCertificateValidation";
     private static final String PROXY_ACCEPT_SELF_SIGNED_CERTS_ENV = "PROXY_DISABLE_CERT_VALIDATION";
 
+    /**
+     * determine if we should provide a client key and cert
+     */
+    private static final String PROXY_CLIENT_KEY_FILE = "hawtio.proxyClientKeyFile";
+    private static final String PROXY_CLIENT_KEY_FILE_ENV = "PROXY_CLIENT_KEY_FILE";
+    private static final String PROXY_CLIENT_KEY_PASS = "hawtio.proxyClientKeyPass";
+    private static final String PROXY_CLIENT_KEY_PASS_ENV = "PROXY_CLIENT_KEY_PASS";
+
     public static final String PROXY_WHITELIST = "proxyWhitelist";
     public static final String HAWTIO_PROXY_WHITELIST = "hawtio." + PROXY_WHITELIST;
 
@@ -94,6 +102,10 @@ public class ProxyServlet extends HttpServlet {
     protected boolean doLog = false;
     protected boolean doForwardIP = true;
     protected boolean acceptSelfSignedCerts = false;
+    protected boolean useClientKey = false;
+
+    protected String clientKeyFilename;
+    protected String clientKeyPassword;
 
     protected ProxyWhitelist whitelist;
 
@@ -136,18 +148,37 @@ public class ProxyServlet extends HttpServlet {
             acceptSelfSignedCerts = Boolean.parseBoolean(System.getenv(PROXY_ACCEPT_SELF_SIGNED_CERTS_ENV));
         }
 
-        if (acceptSelfSignedCerts) {
+        if (System.getProperty(PROXY_CLIENT_KEY_FILE) != null) {
+            useClientKey = true;
+            clientKeyFilename = System.getProperty(PROXY_CLIENT_KEY_FILE);
+        } else if (System.getenv(PROXY_CLIENT_KEY_FILE_ENV) != null) {
+            useClientKey = true;
+            clientKeyFilename = System.getenv(PROXY_CLIENT_KEY_FILE_ENV);
+        }
+
+        if (System.getProperty(PROXY_CLIENT_KEY_PASS) != null) {
+            clientKeyPassword = System.getProperty(PROXY_CLIENT_KEY_PASS);
+        } else if (System.getenv(PROXY_CLIENT_KEY_PASS_ENV) != null) {
+            clientKeyPassword = System.getenv(PROXY_CLIENT_KEY_PASS_ENV);
+        }
+
+        if (acceptSelfSignedCerts || useClientKey) {
             try {
-                SSLContextBuilder builder = new SSLContextBuilder();
-                builder.loadTrustMaterial(null, (X509Certificate[] x509Certificates, String s) -> true);
-                SSLConnectionSocketFactory sslsf = new SSLConnectionSocketFactory(
-                        builder.build(), SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER);
-                httpClientBuilder.setSSLSocketFactory(sslsf);
-            } catch (NoSuchAlgorithmException e) {
-                throw new ServletException(e);
-            } catch (KeyStoreException e) {
-                throw new ServletException(e);
-            } catch (KeyManagementException e) {
+                SSLContextBuilder builder = SSLContextBuilder.create();
+
+                if(acceptSelfSignedCerts) {
+                    builder.loadTrustMaterial(new TrustSelfSignedStrategy());
+                }
+
+                if(useClientKey){
+                    File clientKeyFile = new File(clientKeyFilename);
+                    KeyStore clientKeyStore = KeyStore.getInstance("PKCS12");
+                    clientKeyStore.load(FileUtils.openInputStream(clientKeyFile), clientKeyPassword.toCharArray());
+                    builder.loadKeyMaterial(clientKeyStore, clientKeyPassword.toCharArray());
+                }
+
+                httpClientBuilder.setSSLContext(builder.build());
+            } catch (NoSuchAlgorithmException | KeyStoreException | KeyManagementException | IOException | CertificateException | UnrecoverableKeyException e) {
                 throw new ServletException(e);
             }
         }

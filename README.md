@@ -1,3 +1,10 @@
+added ability to specify client key/cert/password to use when jolokia is configured for cert based auth
+
+    -Dhawtio.proxyClientKeyFile=/path/to/a/key/cert/combo.p12
+    -Dhawtio.proxyClientKeyPass=the-passphrase-for-the-p12
+
+# # # # # # # # # # #
+
 ![hawtio][logo]
 
 [![CircleCI](https://circleci.com/gh/hawtio/hawtio.svg?style=shield)](https://circleci.com/gh/hawtio/hawtio)
